@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Block Stacker</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#1b1d2a;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    min-height:100vh;
+    color:#fff;
+    overflow-x:hidden;
+  }
+  .page {
+    width:100%;
+    max-width:480px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+  .ad-slot {
+    width:100%;
+    background:#2a2d40;
+    color:#777;
+    font-size:12px;
+    text-align:center;
+    padding:8px 0;
+    border:1px dashed #444;
+  }
+  #gameWrap {
+    position:relative;
+    width:100%;
+    max-width:480px;
+    aspect-ratio: 9/16;
+    background:linear-gradient(180deg,#2b2f4a,#1b1d2a);
+    overflow:hidden;
+    touch-action:none;
+  }
+  canvas { display:block; width:100%; height:100%; }
+  #score {
+    position:absolute;
+    top:16px; left:0; right:0;
+    text-align:center;
+    font-size:38px;
+    font-weight:700;
+    text-shadow:0 2px 6px rgba(0,0,0,0.5);
+    pointer-events:none;
+    z-index:5;
+  }
+  #overlay {
+    position:absolute;
+    inset:0;
+    background:rgba(15,16,24,0.92);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    z-index:10;
+    padding:20px;
+  }
+  #overlay h1 { font-size:30px; margin-bottom:6px; }
+  #overlay p { color:#aab; margin-bottom:18px; font-size:15px; }
+  .btn {
+    background:#ff5d5d;
+    color:#fff;
+    border:none;
+    padding:14px 34px;
+    font-size:18px;
+    font-weight:600;
+    border-radius:30px;
+    cursor:pointer;
+    margin-top:6px;
+    transition:transform .1s;
+  }
+  .btn:active { transform:scale(0.95); }
+  .hidden { display:none !important; }
+  #bestRow {
+    margin-top:14px;
+    font-size:13px;
+    color:#8a8da0;
+  }
+  #footer {
+    width:100%;
+    max-width:480px;
+    text-align:center;
+    padding:14px 10px 28px;
+    font-size:13px;
+    color:#777;
+  }
+  #footer a {
+    color:#ff8a8a;
+    text-decoration:none;
+    font-weight:600;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- AD SLOT 1: TOP BANNER -->
+  <div class="ad-slot" id="adTop">[ Ad banner — 320x50 — replace with AdSense/itch.io ad code ]</div>
+
+  <div id="gameWrap">
+    <div id="score">0</div>
+    <canvas id="game"></canvas>
+
+    <div id="overlay">
+      <h1>Block Stacker</h1>
+      <p>Tap or press Space to drop the block.<br>Stack as high as you can!</p>
+      <button class="btn" id="startBtn">Play</button>
+      <div id="bestRow">Best: 0</div>
+    </div>
+  </div>
+
+  <!-- AD SLOT 2: BOTTOM BANNER -->
+  <div class="ad-slot" id="adBottom">[ Ad banner — 320x50 — replace with AdSense/itch.io ad code ]</div>
+
+  <div id="footer">
+    Enjoying the game? <a href="https://ko-fi.com/" target="_blank" rel="noopener">Leave a tip ☕</a>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const bestRow = document.getElementById('bestRow');
+  const wrap = document.getElementById('gameWrap');
+
+  let W, H;
+  function resize(){
+    W = wrap.clientWidth;
+    H = wrap.clientHeight;
+    canvas.width = W;
+    canvas.height = H;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const COLORS = ['#ff5d5d','#ffb84d','#ffe24d','#7ee787','#5dd2ff','#7d8bff','#d97dff'];
+
+  let blocks, current, score, gameOver, baseWidth, cameraY, speed;
+
+  function getBest(){ return parseInt(localStorage.getItem('blockStackerBest')||'0',10); }
+  function setBest(v){ localStorage.setItem('blockStackerBest', v); }
+  bestRow.textContent = 'Best: ' + getBest();
+
+  function reset(){
+    baseWidth = W * 0.55;
+    blocks = [{
+      x: (W - baseWidth)/2,
+      y: H - 80,
+      w: baseWidth,
+      h: 40,
+      color: '#3d4159'
+    }];
+    score = 0;
+    gameOver = false;
+    cameraY = 0;
+    spawnNext();
+    scoreEl.textContent = '0';
+  }
+
+  function spawnNext(){
+    const last = blocks[blocks.length-1];
+    speed = 2.2 + Math.min(score * 0.07, 4.5);
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    current = {
+      x: dir === 1 ? -last.w : W,
+      y: last.y - 40,
+      w: last.w,
+      h: 40,
+      dir: dir,
+      color: COLORS[score % COLORS.length]
+    };
+  }
+
+  function drop(){
+    if (gameOver) return;
+    const last = blocks[blocks.length-1];
+    const overlapLeft = Math.max(current.x, last.x);
+    const overlapRight = Math.min(current.x + current.w, last.x + last.w);
+    const overlapW = overlapRight - overlapLeft;
+
+    if (overlapW <= 4) {
+      gameOver = true;
+      endGame();
+      return;
+    }
+
+    current.x = overlapLeft;
+    current.w = overlapW;
+    blocks.push({ x: current.x, y: current.y, w: current.w, h: current.h, color: current.color });
+    score++;
+    scoreEl.textContent = score;
+
+    if (blocks.length * 40 > H * 0.55) {
+      cameraY += 40;
+    }
+    spawnNext();
+  }
+
+  function endGame(){
+    const best = getBest();
+    if (score > best) setBest(score);
+    bestRow.textContent = 'Best: ' + Math.max(score, best);
+    document.querySelector('#overlay h1').textContent = 'Game over';
+    document.querySelector('#overlay p').innerHTML = 'You stacked ' + score + ' blocks.<br>Tap play to try again.';
+    startBtn.textContent = 'Play again';
+    overlay.classList.remove('hidden');
+  }
+
+  function update(){
+    if (gameOver) return;
+    current.x += current.dir * speed;
+    if (current.dir === 1 && current.x > W) current.dir = -1;
+    if (current.dir === -1 && current.x + current.w < 0) current.dir = 1;
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.save();
+    ctx.translate(0, cameraY);
+
+    for (const b of blocks){
+      ctx.fillStyle = b.color;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    if (!gameOver && current){
+      ctx.fillStyle = current.color;
+      ctx.fillRect(current.x, current.y, current.w, current.h);
+    }
+    ctx.restore();
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function startGame(){
+    overlay.classList.add('hidden');
+    document.querySelector('#overlay h1').textContent = 'Block Stacker';
+    document.querySelector('#overlay p').innerHTML = 'Tap or press Space to drop the block.<br>Stack as high as you can!';
+    startBtn.textContent = 'Play';
+    reset();
+  }
+
+  startBtn.addEventListener('click', startGame);
+  canvas.addEventListener('pointerdown', drop);
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); drop(); }
+  });
+
+  reset();
+  loop();
+})();
+</script>
+</body>
+</html>
